@@ -965,6 +965,7 @@ protected:
   bool _on_disk;
   bool _built;
 public:
+  AnnoyIndex() = default;
 
    AnnoyIndex(int f) : _f(f), _seed(Random::default_seed) {
     _s = offsetof(Node, v) + _f * sizeof(T); // Size of each node
