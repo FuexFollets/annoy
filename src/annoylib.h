@@ -167,8 +167,8 @@ inline bool remap_memory_and_truncate(void** _ptr, int _fd, size_t old_size, siz
 namespace {
 
 template<typename S, typename Node>
-inline Node* get_node_ptr(const void* _nodes, const size_t _s, const S i) {
-  return (Node*)((uint8_t *)_nodes + (_s * i));
+inline Node* get_node_ptr(vector<uint8_t> _nodes, const size_t _s, const S i) {
+  return (Node*)(_nodes.data() + (_s * i));
 }
 
 template<typename T>
@@ -407,13 +407,13 @@ inline void two_means(const vector<Node*>& nodes, int f, Random& random, bool co
 
 struct Base {
   template<typename T, typename S, typename Node>
-  static inline void preprocess(void* nodes, size_t _s, const S node_count, const int f) {
+  static inline void preprocess(vector<uint8_t> nodes, size_t _s, const S node_count, const int f) {
     // Override this in specific metric structs below if you need to do any pre-processing
     // on the entire set of nodes passed into this index.
   }
 
   template<typename T, typename S, typename Node>
-  static inline void postprocess(void* nodes, size_t _s, const S node_count, const int f) {
+  static inline void postprocess(vector<uint8_t> nodes, size_t _s, const S node_count, const int f) {
     // Override this in specific metric structs below if you need to do any post-processing
     // on the entire set of nodes passed into this index.
   }
@@ -661,7 +661,7 @@ struct DotProduct : Angular {
   }
 
   template<typename T, typename S, typename Node>
-  static inline void preprocess(void* nodes, size_t _s, const S node_count, const int f) {
+  static inline void preprocess(vector<uint8_t> nodes, size_t _s, const S node_count, const int f) {
     // This uses a method from Microsoft Research for transforming inner product spaces to cosine/angular-compatible spaces.
     // (Bachrach et al., 2014, see https://www.microsoft.com/en-us/research/wp-content/uploads/2016/02/XboxInnerProduct.pdf)
 
@@ -696,7 +696,7 @@ struct DotProduct : Angular {
   }
 
   template<typename T, typename S, typename Node>
-  static inline void postprocess(void* nodes, size_t _s, const S node_count, const int f) {
+  static inline void postprocess(vector<uint8_t> nodes, size_t _s, const S node_count, const int f) {
     for (S i = 0; i < node_count; i++) {
       Node* node = get_node_ptr<S, Node>(nodes, _s, i);
       // When an index is built, we will remember it in index item nodes to compute distances differently
@@ -950,10 +950,10 @@ public:
 #endif
 
 protected:
-  const int _f;
+  int _f;
   size_t _s;
   S _n_items;
-  void* _nodes; // Could either be mmapped, or point to a memory buffer that we reallocate
+  vector<uint8_t> _nodes {}; // Could either be mmapped, or point to a memory buffer that we reallocate
   S _n_nodes;
   S _nodes_size;
   vector<S> _roots;
@@ -968,9 +968,11 @@ public:
 
 template <typename Archive>
 void serialize(Archive& archive) {
-    archive(_f, _s, _n_items, _n_nodes, _nodes_size, _roots, _K, _seed, _loaded, _verbose, _fd,
+    archive(_f, _s, _n_items, _nodes, _n_nodes, _nodes_size, _roots, _K, _seed, _loaded, _verbose, _fd,
             _on_disk, _built);
 }
+
+  AnnoyIndex() = default;
 
    AnnoyIndex(int f) : _f(f), _seed(Random::default_seed) {
     _s = offsetof(Node, v) + _f * sizeof(T); // Size of each node
@@ -1035,7 +1037,7 @@ void serialize(Archive& archive) {
       return false;
     }
 #ifdef MAP_POPULATE
-    _nodes = (Node*) mmap(0, _s * _nodes_size, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_POPULATE, _fd, 0);
+    // _nodes = (Node*) mmap(0, _s * _nodes_size, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_POPULATE, _fd, 0);
 #else
     _nodes = (Node*) mmap(0, _s * _nodes_size, PROT_READ | PROT_WRITE, MAP_SHARED, _fd, 0);
 #endif
@@ -1068,17 +1070,6 @@ void serialize(Archive& archive) {
 
     if (_verbose) annoylib_showUpdate("has %d nodes\n", _n_nodes);
     
-    if (_on_disk) {
-      if (!remap_memory_and_truncate(&_nodes, _fd,
-          static_cast<size_t>(_s) * static_cast<size_t>(_nodes_size),
-          static_cast<size_t>(_s) * static_cast<size_t>(_n_nodes))) {
-        // TODO: this probably creates an index in a corrupt state... not sure what to do
-        set_error_from_errno(error, "Unable to truncate");
-        return false;
-      }
-      _nodes_size = _n_nodes;
-    }
-
     D::template postprocess<T, S, Node>(_nodes, _s, _n_items, _f);
 
     _built = true;
@@ -1119,7 +1110,7 @@ void serialize(Archive& archive) {
         return false;
       }
 
-      if (fwrite(_nodes, _s, _n_nodes, f) != (size_t) _n_nodes) {
+      if (fwrite(_nodes.data(), _s, _n_nodes, f) != (size_t) _n_nodes) {
         set_error_from_errno(error, "Unable to write");
         return false;
       }
@@ -1136,7 +1127,7 @@ void serialize(Archive& archive) {
 
   void reinitialize() {
     _fd = 0;
-    _nodes = NULL;
+    _nodes.clear();
     _loaded = false;
     _n_items = 0;
     _n_nodes = 0;
@@ -1153,7 +1144,7 @@ void serialize(Archive& archive) {
 #else
       _close(_fd);
 #endif
-      munmap(_nodes, _s * _nodes_size);
+      munmap(_nodes.data(), _s * _nodes_size);
     } else {
       if (_fd) {
         // we have mmapped data
@@ -1162,10 +1153,10 @@ void serialize(Archive& archive) {
 #else
         _close(_fd);
 #endif
-        munmap(_nodes, _n_nodes * _s);
-      } else if (_nodes) {
+        munmap(_nodes.data(), _n_nodes * _s);
+      } else if (!_nodes.empty()) {
         // We have heap allocated data
-        free(_nodes);
+        _nodes.clear();
       }
     }
     reinitialize();
@@ -1204,7 +1195,7 @@ void serialize(Archive& archive) {
       annoylib_showUpdate("prefault is set to true, but MAP_POPULATE is not defined on this platform");
 #endif
     }
-    _nodes = (Node*)mmap(0, size, PROT_READ, flags, _fd, 0);
+    // _nodes = (Node*)mmap(0, size, PROT_READ, flags, _fd, 0);
     _n_nodes = (S)(size / _s);
 
     // Find the roots by scanning the end of the file and taking the nodes with most descendants
@@ -1307,21 +1298,13 @@ protected:
   void _reallocate_nodes(S n) {
     const double reallocation_factor = 1.3;
     S new_nodes_size = std::max(n, (S) ((_nodes_size + 1) * reallocation_factor));
-    void *old = _nodes;
     
-    if (_on_disk) {
-      if (!remap_memory_and_truncate(&_nodes, _fd, 
-          static_cast<size_t>(_s) * static_cast<size_t>(_nodes_size), 
-          static_cast<size_t>(_s) * static_cast<size_t>(new_nodes_size)) && 
-          _verbose)
-          annoylib_showUpdate("File truncation error\n");
-    } else {
-      _nodes = realloc(_nodes, _s * new_nodes_size);
-      memset((char *) _nodes + (_nodes_size * _s) / sizeof(char), 0, (new_nodes_size - _nodes_size) * _s);
+    {
+      _nodes = vector<uint8_t>(_s * new_nodes_size);
+      memset((char *) _nodes.data() + (_nodes_size * _s) / sizeof(char), 0, (new_nodes_size - _nodes_size) * _s);
     }
     
     _nodes_size = new_nodes_size;
-    if (_verbose) annoylib_showUpdate("Reallocating to %d nodes: old_address=%p, new_address=%p\n", new_nodes_size, old, _nodes);
   }
 
   void _allocate_size(S n, ThreadedBuildPolicy& threaded_build_policy) {
