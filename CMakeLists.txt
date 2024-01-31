@@ -9,12 +9,14 @@ add_library(Annoy INTERFACE)
 add_library(Annoy::Annoy ALIAS Annoy)
 
 foreach (HEADER annoylib.h kissrandom.h mman.h)
-  configure_file("${CMAKE_CURRENT_SOURCE_DIR}/src/${HEADER}" "${CMAKE_CURRENT_BINARY_DIR}/include/annoy/${HEADER}" COPYONLY)
+    configure_file("${CMAKE_CURRENT_SOURCE_DIR}/src/${HEADER}" "${CMAKE_CURRENT_BINARY_DIR}/include/annoy/${HEADER}" COPYONLY)
 endforeach ()
 
 target_include_directories(Annoy INTERFACE
   $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include>
-  $<INSTALL_INTERFACE:include>)
+  $<INSTALL_INTERFACE:include>
+  $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/lib/cereal/include>
+  )
 
 # Install
 include(GNUInstallDirs)
