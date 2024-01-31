@@ -57,6 +57,8 @@ typedef signed __int64    int64_t;
 #include <algorithm>
 #include <queue>
 #include <limits>
+#include <cereal/cereal.hpp>
+#include <cereal/types/vector.hpp>
 
 #if __cplusplus >= 201103L
 #include <type_traits>
@@ -963,6 +965,12 @@ protected:
   bool _on_disk;
   bool _built;
 public:
+
+template <typename Archive>
+void serialize(Archive& archive) {
+    archive(_f, _s, _n_items, _n_nodes, _nodes_size, _roots, _K, _seed, _loaded, _verbose, _fd,
+            _on_disk, _built);
+}
 
    AnnoyIndex(int f) : _f(f), _seed(Random::default_seed) {
     _s = offsetof(Node, v) + _f * sizeof(T); // Size of each node
