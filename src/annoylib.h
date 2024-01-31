@@ -57,6 +57,7 @@ typedef signed __int64    int64_t;
 #include <algorithm>
 #include <queue>
 #include <limits>
+#include <cereal/cereal.hpp>
 
 #if __cplusplus >= 201103L
 #include <type_traits>
